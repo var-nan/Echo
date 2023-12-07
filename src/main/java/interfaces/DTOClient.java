@@ -22,7 +22,7 @@ public class DTOClient implements Serializable {
     public Type requestType;
     public RequestStatus requestStatus;
 
-    DTOClient(String key, Object value, Type type) {
+    public DTOClient(String key, Object value, Type type) {
         this.key = key;
         this.requestType = type;
         this.value = value;

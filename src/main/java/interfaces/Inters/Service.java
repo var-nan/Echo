@@ -4,6 +4,7 @@ import main.java.interfaces.DTOClient;
 import org.apache.commons.lang3.SerializationUtils;
 import org.apache.zookeeper.*;
 import org.apache.zookeeper.AsyncCallback.StringCallback;
+import org.apache.zookeeper.data.Stat;
 
 import java.io.IOException;
 import java.net.Inet4Address;
@@ -173,10 +174,15 @@ public class Service{
     void start() {
         try {
             // if leader node not exists, then participate in election.
-            if (zooKeeper.exists(LEADER_PATH,leaderWatcher) == null) {
+            var stat = zooKeeper.exists(LEADER_PATH, leaderWatcher);
+            if (stat  == null) {
                 System.out.println("Leader not present");
                 runForLeader();
+            } else {
+                currentLeaderAddress = new String(zooKeeper.getData(LEADER_PATH,leaderWatcher,stat));
+                System.out.println("Current leader address is "+currentLeaderAddress);
             }
+
 
             Thread.sleep(SLEEP_TIME); // wait for callback
 
@@ -244,7 +250,9 @@ public class Service{
             clientServer.register(selector, SelectionKey.OP_ACCEPT);
 
         } catch (IOException e) {
-            System.out.println("Unable to start server for clients");
+            e.printStackTrace();
+
+            System.out.println("Unable to start server for clients: "+e.getMessage());
             System.exit(-1); // TODO check exit status
         }
 

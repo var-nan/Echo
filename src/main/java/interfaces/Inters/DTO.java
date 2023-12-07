@@ -7,6 +7,11 @@ import java.io.Serializable;
  */
 public class DTO {
 
+    class ClientDto implements Serializable {
+        String key;
+        Object value;
+    }
+
     enum COMMIT_RESPONSE implements Serializable {
         OLD_COMMIT ,
         ACKNOWLEDGEMENT,

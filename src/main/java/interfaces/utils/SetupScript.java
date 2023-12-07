@@ -1,9 +1,8 @@
-package main.java.interfaces.Inters;
+package main.java.interfaces.utils;
 
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooKeeper;
-import org.apache.zookeeper.data.Stat;
 
 import java.io.IOException;
 

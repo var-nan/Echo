@@ -9,7 +9,7 @@ public class Constants {
 
     public static final int COMMIT_PORT = 5002; // leader opens this port for committing.
     public static final int LEADER_PORT = 5000; // leader opens this port and replicas connect to this port for sending write requests..
-    public static final int CLIENT_PORT = 5005;
+    public static final int CLIENT_PORT = 5005; // replica opens this port and clients connect via this port.
 
     public static final int N_BYTES = 1024;
 
