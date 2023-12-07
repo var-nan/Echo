@@ -186,7 +186,7 @@ public class Service{
 
             Thread.sleep(SLEEP_TIME); // wait for callback
 
-            System.out.println("Value of isLeader is "+isLeader);
+            //System.out.println("Value of isLeader is "+isLeader);
             if (!isLeader) {
                 // setup zknode and server for clients
                 setupZnode();
@@ -248,6 +248,7 @@ public class Service{
 
             selector = Selector.open();
             clientServer.register(selector, SelectionKey.OP_ACCEPT);
+            System.out.println("Started server for Clients");
 
         } catch (IOException e) {
             e.printStackTrace();
@@ -280,10 +281,13 @@ public class Service{
                 while (readyKeys.hasNext()) { // do not disturb this loop right after becoming leader?
 
                     var key = readyKeys.next();
+                    readyKeys.remove();
 
                     if (key.isAcceptable()) {
                         ServerSocketChannel serverSocketChannel = (ServerSocketChannel) key.channel();
-                        SocketChannel client = serverSocketChannel.accept();
+                        SocketChannel client;// = serverSocketChannel.accept();
+                        while((client = serverSocketChannel.accept()) == null);
+                        System.out.println("Connected to client");
                         client.configureBlocking(false);
                         ClientAttachment attachment = new ClientAttachment(ByteBuffer.allocate(N_BYTES));
                         client.register(selector, CLIENT_OPS,attachment);
@@ -412,6 +416,7 @@ public class Service{
             // read queue and process them
 
             try (SocketChannel masterChannel = SocketChannel.open(new InetSocketAddress(currentLeaderAddress,LEADER_PORT))) {
+                System.out.println("Connection Thread connected to Leader.");
                 ByteBuffer buffer = ByteBuffer.allocate(32); // TODO CHANGE THIS
 
                 // send the latest commit to leader.
@@ -490,6 +495,8 @@ public class Service{
             try (SocketChannel commitChannel = SocketChannel.open(
                     new InetSocketAddress(currentLeaderAddress, COMMIT_PORT))) {
                 // PARTICIPATE IN PROTOCOL.
+
+                System.out.println("Commit Thread connected to leader");
                 while (!isLeader) {
 
                     if (interruptThread) {

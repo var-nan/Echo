@@ -31,7 +31,7 @@ public class CentralImpl implements Central{
     private Watcher leaderWatcher = new Watcher() {
         @Override
         public void process(WatchedEvent event) {
-            // get master address
+            // if current master is crashed, get new address.
         }
     };
 
@@ -50,11 +50,13 @@ public class CentralImpl implements Central{
 
         try {
             assignment = new HashMap<>();
-            zooKeeper = new ZooKeeper("rurl", ZK_TIMEOUT, null);
+            zooKeeper = new ZooKeeper("localhost", ZK_TIMEOUT, null);
+            System.out.println("Connected to zookeeper");
+            updateList();
 
 
         } catch (IOException e) {
-
+            e.printStackTrace();
         }
     }
 
@@ -62,15 +64,16 @@ public class CentralImpl implements Central{
 
         //zooKeeper.getChildren()
         try {
-            var replicas = zooKeeper.getChildren("/replicas",replicaWatcher);
+            var replicas = zooKeeper.getChildren(REPLICA_PATH,replicaWatcher);
             //List<String> replicaAddresses = new ArrayList<>(replicas.size());
             for (String replica: replicas) {
-                var address = new String(zooKeeper.getData(replica, false,null));
+
+                var address = new String(zooKeeper.getData(REPLICA_PATH+"/"+replica, false,null));
                 if (!assignment.containsKey(address)) {
                     assignment.put(address,INITIAL_VAL);
                 }
             }
-
+            System.out.println("Replica List is updated.");
         } catch (KeeperException e) {
             e.printStackTrace();
         } catch (InterruptedException e) {
@@ -84,13 +87,19 @@ public class CentralImpl implements Central{
 
         try (DatagramSocket serverSocket = new DatagramSocket(CENTRAL_UDP_PORT)) {
 
+            //var address = serverSocket.getLocalSocketAddress().toString();
+            var address = serverSocket.getLocalAddress().getHostAddress();
+            //var address = serverSocket.getRemoteSocketAddress().toString();
+            System.out.println("Central address: " +address + " . Port: "+CENTRAL_UDP_PORT);
+
             while(true) {
                 try {
                     DatagramPacket request = new DatagramPacket(
                             new byte[RCV_PACKET_SIZE], RCV_PACKET_SIZE
                     );
                     serverSocket.receive(request);
-                    var serverData = SerializationUtils.serialize(getServer());
+
+                    var serverData = getServer().getBytes();
                     DatagramPacket response = new DatagramPacket(serverData,
                             serverData.length, request.getAddress(), request.getPort()
                     );
@@ -122,6 +131,8 @@ public class CentralImpl implements Central{
         }
 
         assignment.put(minServer, ++minCount);
+
+        System.out.println("Returning  server "+minServer);
         return minServer;
     }
 

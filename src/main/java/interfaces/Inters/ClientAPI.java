@@ -17,7 +17,7 @@ public class ClientAPI {
 
     //private ZooKeeper zooKeeper;
 
-    private String centralUrl = ""; // TODO add this.
+    private String centralUrl; // TODO add this.
 
     private String serverUrl;
 
@@ -31,11 +31,24 @@ public class ClientAPI {
 
     private final int replicaPort = CLIENT_PORT;
 
+    public ClientAPI(String centralUrl) {
+        this.centralUrl = centralUrl;
+        channelBuffer = ByteBuffer.allocate(1024);
+        // connect to centralUrl and get a server name
+        //socket = new DatagramSocket();
+        //connectToCentral();
+
+        connectToServer();
+
+    }
+
     private void connectToCentral() {
         //InetAddress centralAddress = null;
 
+        System.out.println("Conneting to Central");
+
         try(DatagramSocket socket = new DatagramSocket()) {
-            InetAddress centralAddress = InetAddress.getByAddress(centralUrl.getBytes());
+            InetAddress centralAddress = InetAddress.getByName(centralUrl);
             byte[] buffer = new byte[256];// TODO CHANGE THIS.
             DatagramPacket packet = new DatagramPacket(buffer, buffer.length,centralAddress,port);
 
@@ -45,6 +58,8 @@ public class ClientAPI {
             packet = new DatagramPacket(buffer,buffer.length);
             socket.receive(packet);
             serverUrl = new String(packet.getData(),0,packet.getLength());
+
+            System.out.println("Received Server Address from Central: " + serverUrl);
         } catch (UnknownHostException e) {
             e.printStackTrace();
         } catch (IOException e) {
@@ -52,21 +67,13 @@ public class ClientAPI {
         }
     }
 
-    public ClientAPI(String centralUrl) {
-        this.centralUrl = centralUrl;
-        channelBuffer = ByteBuffer.allocate(1024);
-        // connect to centralUrl and get a server name
-        //socket = new DatagramSocket();
-        connectToCentral();
-
-        connectToServer();
-
-    }
-
     private void connectToServer() {
-
+        serverUrl = "10.29.154.220"; // TODO CHANGE THIS
+        System.out.println("Connecting to server at "+serverUrl);
+        System.out.flush();
         try {
             socketChannel = SocketChannel.open(new InetSocketAddress(serverUrl,replicaPort));
+            System.out.println("Connected to server at "+serverUrl);
             //socket.bind(new InetSocketAddress(serverUrl, replicaPort));
             //DTOClient object = new DTOClient("home","India", DTOClient.Type.PUT);
             //var bytes = SerializationUtils.serialize(object);
