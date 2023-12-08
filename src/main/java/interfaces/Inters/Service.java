@@ -1,6 +1,7 @@
 package main.java.interfaces.Inters;
 
 import main.java.interfaces.DTOClient;
+import org.apache.commons.lang3.SerializationException;
 import org.apache.commons.lang3.SerializationUtils;
 import org.apache.zookeeper.*;
 import org.apache.zookeeper.AsyncCallback.StringCallback;
@@ -230,6 +231,7 @@ public class Service{
             e.printStackTrace();
         }
     }
+
     void runForLeader() {
         // check if there is no leader
         System.out.println("Participating in election.");
@@ -286,7 +288,7 @@ public class Service{
                     if (key.isAcceptable()) {
                         ServerSocketChannel serverSocketChannel = (ServerSocketChannel) key.channel();
                         SocketChannel client;// = serverSocketChannel.accept();
-                        while((client = serverSocketChannel.accept()) == null);
+                        while((client = serverSocketChannel.accept()) == null) Thread.onSpinWait(); // TODO remove in future
                         System.out.println("Connected to client");
                         client.configureBlocking(false);
                         ClientAttachment attachment = new ClientAttachment(ByteBuffer.allocate(N_BYTES));
@@ -297,6 +299,7 @@ public class Service{
                         SocketChannel client = (SocketChannel) key.channel();
                         ClientAttachment attachment = (ClientAttachment) key.attachment();
                         ByteBuffer buffer = attachment.buffer;
+                        buffer.clear();
                         client.read(buffer);
                         buffer.flip();
                         DTOClient request = SerializationUtils.deserialize(buffer.array());
@@ -324,12 +327,12 @@ public class Service{
                     }
                 }
 
-            } catch (IOException e) {
+            } catch (IOException | SerializationException e) {
                 e.printStackTrace();
             }
         }
 
-        // I'm the leader.
+        // If current process became leader in recent election.
         if (isLeader) {
             closeClientConnections();
             closeLeaderConnection();
@@ -415,7 +418,9 @@ public class Service{
             //connectToLeader();
             // read queue and process them
 
-            try (SocketChannel masterChannel = SocketChannel.open(new InetSocketAddress(currentLeaderAddress,LEADER_PORT))) {
+            try (SocketChannel masterChannel = SocketChannel.open(
+                    new InetSocketAddress(currentLeaderAddress,LEADER_PORT))
+            ) {
                 System.out.println("Connection Thread connected to Leader.");
                 ByteBuffer buffer = ByteBuffer.allocate(32); // TODO CHANGE THIS
 
@@ -456,6 +461,7 @@ public class Service{
                         var object = new DTO.RequestObject(replicaId,writeRequest);
                         // write to channel.
                         masterChannel.write(ByteBuffer.wrap(SerializationUtils.serialize(object)));
+                        System.out.println("Request: "+writeRequest.key + ", "+writeRequest.value + " sent to leader");
 
                         // wait for response. blocking.
                         masterChannel.read(buffer);
@@ -547,7 +553,12 @@ public class Service{
     }
 
     class ClientAttachment {
-        ByteBuffer buffer;
+        ByteBuffer buffer; // non-direct buffer, holds backing array.
+
+        ClientAttachment(int capacity) {
+            this.buffer = ByteBuffer.allocate(capacity);
+        }
+
         ClientAttachment (ByteBuffer buffer) {
             this.buffer = buffer;
         }

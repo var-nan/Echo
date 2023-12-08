@@ -129,6 +129,7 @@ public class Leader {
             // loop to accept replica connections
             while (count < connectedReplicas) {
                 SocketChannel socket = replicaServer.accept();
+                System.out.println("Connection Established: "+socket.socket().getInetAddress().getHostAddress());
                 RepAttachment attachment = new RepAttachment(null,ByteBuffer.allocate(N_BYTES));
                 socket.register(replicaSelector, REPLICA_OPS, attachment); // TODO add attachment
                 count++;
@@ -339,6 +340,7 @@ public class Leader {
                 while (count < connectedReplicas) {
                     // Accept connections from replicas.
                     SocketChannel sc = commitServerChannel.accept();
+                    System.out.println("Connection Established");
                     sc.configureBlocking(false);
 
                     CommitAttachment attachment = new CommitAttachment(
