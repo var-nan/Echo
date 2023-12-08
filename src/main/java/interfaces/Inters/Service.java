@@ -3,6 +3,8 @@ package main.java.interfaces.Inters;
 import main.java.interfaces.DTOClient;
 import org.apache.commons.lang3.SerializationException;
 import org.apache.commons.lang3.SerializationUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.zookeeper.*;
 import org.apache.zookeeper.AsyncCallback.StringCallback;
 import org.apache.zookeeper.data.Stat;
@@ -11,6 +13,7 @@ import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
@@ -19,8 +22,10 @@ import java.nio.channels.SocketChannel;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Random;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
 import static java.nio.channels.ServerSocketChannel.open;
 import static main.java.interfaces.constants.Constants.*;
@@ -30,6 +35,8 @@ import static org.apache.zookeeper.ZooDefs.Ids.OPEN_ACL_UNSAFE;
  * @author nandhan, Created on 21/11/23
  */
 public class Service{
+
+    static Logger logger = LogManager.getLogger(Service.class);
     /*
         Zookeeper node is already been setup by the parent class.
         Zookeeper, latestCommitId, status, and data store should be shared with the parent.
@@ -43,17 +50,21 @@ public class Service{
     }
     private String ipAddress;
 
-    private Queue<DTO.KVPair>  pendingWriteRequests;
+    private volatile BlockingQueue<DTO.KVPair> pendingWriteRequests;
     private Queue<DTO.KVPair> finishedWriteRequests;
 
     private DTO.KVPair lastWriteRequest; // SEND THIS TO NEW LEADER.
 
-    private Map<String,Object> dataStore;
+    private volatile DTO.KVPair lastCommit;
+
+    private volatile Map<String,Object> dataStore;
 
     private ServerSocketChannel clientServer;
     //private SocketChannel masterSocket; // channel to communicate with leader.
 
     private Selector selector;
+
+    private volatile boolean startCommitThread;
 
     //private int leaderPort;
 
@@ -91,21 +102,23 @@ public class Service{
             ipAddress = InetAddress.getLocalHost().getHostAddress(); //TODO ADD VALID ADDRESS.
             latestCommitId = INITIAL_COMMIT;
             zooKeeper = new ZooKeeper(zkConnect, ZK_TIMEOUT,null);
-            System.out.println("Connected to Zookeeper");
+            logger.info("Connected to Zookeeper");
             dataStore = new ConcurrentHashMap<>(INITIAL_TABLE_SIZE, LOAD_FACTOR, CONCURRENCY_LEVEL);
             replicaId = String.valueOf(new Random().nextLong(1,(long)1e5));
             isLeader = false;
             //currentLeaderAddress = null;
             lastWriteRequest = null;
-            pendingWriteRequests = new ConcurrentLinkedQueue<>(); // fifo queue
+            lastCommit = new DTO.KVPair("","",-1);
+            pendingWriteRequests = new LinkedBlockingQueue<>(); // fifo queue
+            startCommitThread = false;
 
             leaderWatcher = new Watcher() {
                 @Override
                 public void process(WatchedEvent event) {
                     // check event type and take action
                     if (event.getType() == Event.EventType.NodeDeleted) {
-                        System.out.println("Current Leader Crashed. Participating in election");
-                        System.out.flush();
+                        logger.info("Current Leader Crashed. Participating in election");
+                        //System.out.flush();
                         // participate in election
                         runForLeader(); // does it get the updated leader information?
                     }
@@ -123,7 +136,7 @@ public class Service{
                             close connections with the clients'
                             setup Leader server for replicas.
                              */
-                            System.out.println("I'm the leader.");
+                            logger.info("I'm the leader.");
 
                             status = Status.LEADER;
                             isLeader = true;
@@ -136,7 +149,7 @@ public class Service{
                         case NODEEXISTS -> {
                             // leader already exists, get leader id
                             try {
-                                System.out.println("Leader already exists");
+                                logger.info("Leader already exists");
                                 // get new leader information.
                                 var data = new String(zooKeeper.getData(LEADER_PATH, leaderWatcher, null));
                                 System.out.println("current leader is: "+data);
@@ -198,7 +211,7 @@ public class Service{
                 startAccepting();
             } else {
                 System.out.println("Transitioning to leader mode. ");
-                Leader leader = new Leader(this.zooKeeper,0,new ConcurrentLinkedQueue<>());
+                Leader leader = new Leader(this.zooKeeper, this.dataStore, lastCommit,0,new ConcurrentLinkedQueue<>());
                 leader.start();
             }
 
@@ -212,11 +225,11 @@ public class Service{
 
     void startThreads() {
         requestThread = new Thread(new ConnectionThread());
-        requestThread.setPriority(Thread.MAX_PRIORITY-1);
+        //requestThread.setPriority(Thread.MAX_PRIORITY-1);
         requestThread.start();
         // start the commit thread
         commitThread = new Thread(new CommitThread());
-        commitThread.setPriority(Thread.MAX_PRIORITY);
+        //commitThread.setPriority(Thread.MAX_PRIORITY);
         commitThread.start();
     }
 
@@ -288,11 +301,12 @@ public class Service{
                     if (key.isAcceptable()) {
                         ServerSocketChannel serverSocketChannel = (ServerSocketChannel) key.channel();
                         SocketChannel client;// = serverSocketChannel.accept();
-                        while((client = serverSocketChannel.accept()) == null) Thread.onSpinWait(); // TODO remove in future
+                        while ((client = serverSocketChannel.accept()) == null)
+                            Thread.onSpinWait(); // TODO remove in future
                         System.out.println("Connected to client");
                         client.configureBlocking(false);
                         ClientAttachment attachment = new ClientAttachment(ByteBuffer.allocate(N_BYTES));
-                        client.register(selector, CLIENT_OPS,attachment);
+                        client.register(selector, CLIENT_OPS, attachment);
 
                     } else if (key.isReadable() && key.isWritable()) { // TODO CHECK LOGIC
                         // read the request and send a response.
@@ -305,6 +319,7 @@ public class Service{
                         DTOClient request = SerializationUtils.deserialize(buffer.array());
                         buffer.clear();
                         key.attach(attachment);
+                        System.out.println("Received request: "+request.key);
 
                         if (request.requestType == DTOClient.Type.GET) {
                             // get request, send response
@@ -317,9 +332,10 @@ public class Service{
                             //client.write(ByteBuffer.wrap(SerializationUtils.serialize(request)));
                         } else {
                             // put request
-                            DTO.KVPair data = new DTO.KVPair(request.key,request.value);
+                            DTO.KVPair data = new DTO.KVPair(request.key, request.value);
                             // put in pending queue
                             pendingWriteRequests.add(data);
+                            System.out.println("Request: "+ data.key + " added to queue");
                             request.requestStatus = DTOClient.RequestStatus.OK;
                         }
                         // send response
@@ -327,6 +343,8 @@ public class Service{
                     }
                 }
 
+            } catch (SocketException e) {
+                logger.warn("Client Disconnected");
             } catch (IOException | SerializationException e) {
                 e.printStackTrace();
             }
@@ -341,7 +359,7 @@ public class Service{
             Queue<DTO.RequestObject> requestObjects = new ConcurrentLinkedQueue<>();
             pendingWriteRequests.forEach(request -> requestObjects.add(new DTO.RequestObject(replicaId,request)));
 
-            Leader leader = new Leader(this.zooKeeper,latestCommitId, requestObjects);
+            Leader leader = new Leader(this.zooKeeper, this.dataStore,lastCommit,latestCommitId, requestObjects);
             leader.start();
 
 
@@ -373,6 +391,8 @@ public class Service{
     private void deleteNode() {
         try {
             zooKeeper.delete( zkReplicaPath, -1);
+            Thread.sleep(2000);
+            System.out.println("Current Node deleted.");
         } catch (InterruptedException e) {
             e.printStackTrace();
         } catch (KeeperException e) {
@@ -399,6 +419,9 @@ public class Service{
 
     }
 
+    /**
+     * This class connects to the current leader to send write requests.
+     */
     class ConnectionThread implements Runnable {
 
         // TODO: REMOVE THIS METHOD AND FIELD.
@@ -422,23 +445,25 @@ public class Service{
                     new InetSocketAddress(currentLeaderAddress,LEADER_PORT))
             ) {
                 System.out.println("Connection Thread connected to Leader.");
-                ByteBuffer buffer = ByteBuffer.allocate(32); // TODO CHANGE THIS
+                ByteBuffer buffer = ByteBuffer.allocate(N_BYTES); // TODO CHANGE THIS
 
                 // send the latest commit to leader.
-                masterChannel.write(ByteBuffer.wrap(SerializationUtils.serialize(latestCommitId)));
-
+                masterChannel.write(ByteBuffer.wrap(SerializationUtils.serialize(lastCommit)));
+                System.out.println("Sent latest commit to leader");
                 // read response from leader.
                 masterChannel.read(buffer);
                 buffer.flip();
                 DTO.KVPair response = SerializationUtils.deserialize(buffer.array());
                 buffer.clear();
-
+                System.out.println("Received leader's latest commmit");
                 if (response.commitId > latestCommitId){
                     // TODO: vague? change in future.
                     dataStore.put(response.key, response.value);
                     latestCommitId = response.commitId;
                 }
-
+                System.out.println(Thread.currentThread().getName()+ " Replica's commits are in sync with leader");
+                startCommitThread = true;
+                System.out.println("Connection Thread: Commit Thread can connect to leader.");
                 // this replica is in sync with leader.
 
                 while (!isLeader) {
@@ -453,7 +478,7 @@ public class Service{
                     }
 
                     if (pendingWriteRequests.isEmpty()) {
-                        Thread.onSpinWait();
+                        //Thread.onSpinWait();
                     }
                     else {
                         DTO.KVPair writeRequest = pendingWriteRequests.peek();
@@ -461,8 +486,8 @@ public class Service{
                         var object = new DTO.RequestObject(replicaId,writeRequest);
                         // write to channel.
                         masterChannel.write(ByteBuffer.wrap(SerializationUtils.serialize(object)));
-                        System.out.println("Request: "+writeRequest.key + ", "+writeRequest.value + " sent to leader");
-
+                        System.out.println("Request: "+writeRequest.key + ", sent to leader");
+                        System.out.flush();
                         // wait for response. blocking.
                         masterChannel.read(buffer);
                         buffer.flip();
@@ -498,11 +523,14 @@ public class Service{
         public void run() {
             ByteBuffer buffer = ByteBuffer.allocate(N_BYTES);
 
+            while(!startCommitThread) Thread.onSpinWait();
+            System.out.println("Commit Thread: Connecting to leader.");
             try (SocketChannel commitChannel = SocketChannel.open(
                     new InetSocketAddress(currentLeaderAddress, COMMIT_PORT))) {
                 // PARTICIPATE IN PROTOCOL.
 
                 System.out.println("Commit Thread connected to leader");
+
                 while (!isLeader) {
 
                     if (interruptThread) {
@@ -521,6 +549,8 @@ public class Service{
                         //DTO.KVPair request = (DTO.KVPair) inputStream.readObject();
                         long commitNumber = request.commitId;
 
+                        System.out.println("Received commit: "+request.commitId + " . Key "+request.key);
+
                         if (commitNumber > latestCommitId) {
                             // TODO: handle if the commit is old commit.
                             dataStore.put(request.key, request.value);
@@ -533,6 +563,7 @@ public class Service{
                             // store to local
                             dataStore.put(request.key, request.value);
                             latestCommitId = request.commitId;
+                            lastCommit = request;
                             //outputStream.writeObject(DTO.COMMIT_RESPONSE.ACKNOWLEDGEMENT);
                         } else {
                             var bytes = SerializationUtils.serialize(

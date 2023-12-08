@@ -33,7 +33,7 @@ public class Leader {
     private Queue<DTO.RequestObject> requestQueue; // stores the list of write requests.
     private Queue<String> finishQueue; // stores list of replicaId whose requests are processed.
 
-    private volatile List<String> replicas;
+    private volatile List<String> replicas; // stores only address of replicas.
 
     private volatile boolean commitInProgress;
 
@@ -53,36 +53,46 @@ public class Leader {
             // only look for addition and deletion of replicas.
             if (event.getType() == Event.EventType.NodeChildrenChanged) {
                 // update replicas? delete current list and get new data.
-                replicas.clear();
-                try {
-                    var children = zooKeeper.getChildren(replicaPath, true);
-                    for (String child : children) {
-                        var data = zooKeeper.getData(replicaPath + "/" + child, false, null);
-                        replicas.add(new String(data));
-                    }
-                    connectedReplicas = replicas.size();
-                    // establish watch again?
-                    zooKeeper.exists(replicaPath, true);
-                } catch (KeeperException e) {
-                    e.printStackTrace();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
+                System.out.println("Replicas size changed.");
+                updateReplicaCount();
             }
         }
     };
 
     private Thread commitThread;
 
+    /**
+     * Queries zookeeper to get list of replicas and
+     * updates connectedReplicas variable.
+     */
+    void updateReplicaCount() {
+        replicas.clear();
+        try {
+            var children = zooKeeper.getChildren(replicaPath, replicaWatcher);
+            for (String child : children) {
+                var data = zooKeeper.getData(replicaPath + "/" + child, false, null);
+                replicas.add(new String(data));
+            }
+            connectedReplicas = replicas.size();
+            // establish watch again?
+            //zooKeeper.exists(replicaPath, re);
+        } catch (KeeperException e) {
+            e.printStackTrace();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
 
-    Leader(ZooKeeper zooKeeper, long latestCommitId, Queue<DTO.RequestObject> requestQueue) {
+    Leader(ZooKeeper zooKeeper, Map<String, Object> dataStore, DTO.KVPair lastCommit, long latestCommitId, Queue<DTO.RequestObject> requestQueue) {
         //requestQueue = new ArrayDeque<>(); // TODO check again
         this.requestQueue = requestQueue;
         this.latestCommitId = latestCommitId;
+        this.zooKeeper = zooKeeper;
+        this.dataStore = dataStore;
 
         finishQueue = new ConcurrentLinkedQueue<>();
 
-        previousCommit = null;
+        previousCommit = lastCommit;
         commitInProgress = false;
 
         // TODO Initialize replicas collection
@@ -95,15 +105,13 @@ public class Leader {
             //replicaServer.configureBlocking(false);
             replicaSelector = Selector.open();
             //replicaServer.register(replicaSelector, LEADER_OPS);
-
+            System.out.println("Server started for replicas");
             // set watch on replicas.
-            zooKeeper.exists(replicaPath, replicaWatcher);
+            //zooKeeper.getChildren(replicaPath,replicaWatcher);
+            //zooKeeper.exists(replicaPath, replicaWatcher);
+            updateReplicaCount();
             // TODO relinquish all streams.
         } catch (IOException e) {
-            e.printStackTrace();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        } catch (KeeperException e) {
             e.printStackTrace();
         }
     }
@@ -124,17 +132,19 @@ public class Leader {
         If leader is fallen behind, then leader will commit the txn.
         If replica is fallen behind, leader will send force commit to that replica.
          */
+        while(connectedReplicas == 0) Thread.onSpinWait();
 
+        System.out.println("Connected Replicas: "+connectedReplicas);
         try {
             // loop to accept replica connections
             while (count < connectedReplicas) {
                 SocketChannel socket = replicaServer.accept();
+                socket.configureBlocking(false);
                 System.out.println("Connection Established: "+socket.socket().getInetAddress().getHostAddress());
                 RepAttachment attachment = new RepAttachment(null,ByteBuffer.allocate(N_BYTES));
                 socket.register(replicaSelector, REPLICA_OPS, attachment); // TODO add attachment
                 count++;
             }
-
 
             this.replicaServer.configureBlocking(false);
             this.replicaServer.register(this.replicaSelector, LEADER_OPS);
@@ -330,6 +340,7 @@ public class Leader {
             try {
                 this.commitServerChannel = ServerSocketChannel.open();
                 this.commitServerChannel.bind(new InetSocketAddress(COMMIT_PORT)); // TODO change port number
+                System.out.println("Leader Commit Thread Started");
                 //this.commitServerChannel.configureBlocking(false);
                 this.commitReplicaSelector = Selector.open();
                 //this.commitServerChannel.register(clientSelector, SelectionKey.OP_ACCEPT);
@@ -395,7 +406,7 @@ public class Leader {
 
            ** DO NOT ACCEPT NEW CONNECTIONS DURING THE PROTOCOL.
              */
-
+            // TODO check commit Id in the request object, lower commitId causes the replica to ignore the commit. VERIFY ASAP
             commitInProgress = true;
             // PHASE 1: SEND COMMIT MESSAGE TO ALL REPLICAS.
             int count = 0;
@@ -425,6 +436,7 @@ public class Leader {
 
                             byte[] sendData = SerializationUtils.serialize(request.KVPair);
                             sc.write(ByteBuffer.wrap(sendData));
+                            System.out.println("Sent Commit Request: "+(latestCommitId+1));
                             //attachment.outputStream.writeObject(request.KVPair);
                             //attachment.outputStream.flush();
                             attachment.commitId = latestCommitId + 1;
@@ -472,13 +484,13 @@ public class Leader {
 
                             sc.read(attachment.buffer);
                             attachment.buffer.flip();
-                            // TODO ** MUST MAKE SURE THE BUFFER HAS ARRAY UNDERLYING.
                             var response = (DTO.COMMIT_RESPONSE) SerializationUtils.deserialize(attachment.buffer.array());
                             //clearBuffer(attachment.buffer);
                             attachment.buffer.clear();
                             //var response = (COMMIT_RESPONSE) attachment.inputStream.readObject();
                             if (response == DTO.COMMIT_RESPONSE.ACKNOWLEDGEMENT) {
                             // todo: handle this later.
+                                System.out.println("Received Ack from server. Commit :"+(latestCommitId+1));
                             } else {
 
                             }

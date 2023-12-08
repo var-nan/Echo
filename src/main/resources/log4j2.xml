@@ -1,0 +1,15 @@
+<configuration status="debug" >
+    <Appenders>
+        <File name="fout" fileName="server_logs.log" append="true">
+            <PatternLayout>
+                <Pattern>%d{yyyy-mm-dd HH:mm:ss} %-5p %m%n</Pattern>
+            </PatternLayout>
+        </File>
+    </Appenders>
+
+    <Loggers>
+        <Root level="INFO">
+            <AppenderRef ref="fout" />
+        </Root>
+    </Loggers>
+</configuration>

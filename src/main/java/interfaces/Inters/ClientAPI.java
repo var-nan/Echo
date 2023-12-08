@@ -68,7 +68,7 @@ public class ClientAPI {
     }
 
     private void connectToServer() {
-        serverUrl = "10.29.154.220"; // TODO CHANGE THIS
+        serverUrl = "10.26.187.200"; // TODO CHANGE THIS
         System.out.println("Connecting to server at "+serverUrl);
         System.out.flush();
         try {
@@ -99,7 +99,7 @@ public class ClientAPI {
     public Object Get(String key) {
 
         try {
-            DTOClient object = new DTOClient(key, null, DTOClient.Type.GET);
+            DTOClient object = new DTOClient(key, -1, DTOClient.Type.GET);
 
             // send request
             var bytes = SerializationUtils.serialize(object);
