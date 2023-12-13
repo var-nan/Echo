@@ -50,7 +50,7 @@ public class Service{
     }
     private String ipAddress;
 
-    private volatile BlockingQueue<DTO.KVPair> pendingWriteRequests;
+    private volatile ConcurrentLinkedQueue<DTO.KVPair> pendingWriteRequests;
     private Queue<DTO.KVPair> finishedWriteRequests;
 
     private DTO.KVPair lastWriteRequest; // SEND THIS TO NEW LEADER.
@@ -109,7 +109,7 @@ public class Service{
             //currentLeaderAddress = null;
             lastWriteRequest = null;
             lastCommit = new DTO.KVPair("","",-1);
-            pendingWriteRequests = new LinkedBlockingQueue<>(); // fifo queue
+            pendingWriteRequests = new ConcurrentLinkedQueue<>(); // fifo queue
             startCommitThread = false;
 
             leaderWatcher = new Watcher() {
@@ -323,6 +323,7 @@ public class Service{
 
                         if (request.requestType == DTOClient.Type.GET) {
                             // get request, send response
+                            //System.out.println("Received Get request");
                             var k = request.key;
                             if (dataStore.containsKey(k)) {
                                 request.value = dataStore.get(k);
@@ -478,7 +479,7 @@ public class Service{
                     }
 
                     if (pendingWriteRequests.isEmpty()) {
-                        //Thread.onSpinWait();
+                        Thread.onSpinWait();
                     }
                     else {
                         DTO.KVPair writeRequest = pendingWriteRequests.peek();
@@ -495,6 +496,7 @@ public class Service{
 
                         if (SerializationUtils.deserialize(buffer.array())
                                 == DTO.COMMIT_RESPONSE.DONE){
+                            System.out.println("Server: Commit completed by leader.");
                             // // write to normal queue.
                             // pop the request queue and
                             pendingWriteRequests.poll();

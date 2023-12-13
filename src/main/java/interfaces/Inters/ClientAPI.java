@@ -68,7 +68,7 @@ public class ClientAPI {
     }
 
     private void connectToServer() {
-        serverUrl = "10.26.187.200"; // TODO CHANGE THIS
+        serverUrl = "10.29.154.220"; // TODO CHANGE THIS
         System.out.println("Connecting to server at "+serverUrl);
         System.out.flush();
         try {
@@ -91,6 +91,20 @@ public class ClientAPI {
             var bytes = SerializationUtils.serialize(object);
 
             socketChannel.write(ByteBuffer.wrap(bytes));
+
+            // read response
+            int nRead = socketChannel.read(channelBuffer);
+            channelBuffer.flip();
+
+            DTOClient response = SerializationUtils.deserialize(channelBuffer.slice(0,nRead).array());
+            channelBuffer.clear();
+
+            if (response.requestStatus == DTOClient.RequestStatus.OK) {
+                System.out.println("Put successful.");
+                //return response.value;
+            } else {
+                System.out.println(" Put Error");
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -112,8 +126,12 @@ public class ClientAPI {
             DTOClient response = SerializationUtils.deserialize(channelBuffer.slice(0,nRead).array());
             channelBuffer.clear();
 
-            if (response.requestStatus == DTOClient.RequestStatus.OK)
+            if (response.requestStatus == DTOClient.RequestStatus.OK) {
+                System.out.println("Response received.");
                 return response.value;
+            } else {
+                System.out.println("Request Status: Error");
+            }
 
         } catch (IOException e) {
             e.printStackTrace();

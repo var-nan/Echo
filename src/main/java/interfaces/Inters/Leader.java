@@ -24,14 +24,14 @@ import static main.java.interfaces.constants.Constants.*;
 public class Leader {
 
     private ZooKeeper zooKeeper;
-    private long latestCommitId;
+    private volatile long latestCommitId;
     private Map<String, Object> dataStore;
 
     private ServerSocketChannel replicaServer;
     private Selector replicaSelector;
     private int replicaCount;
-    private Queue<DTO.RequestObject> requestQueue; // stores the list of write requests.
-    private Queue<String> finishQueue; // stores list of replicaId whose requests are processed.
+    private volatile Queue<DTO.RequestObject> requestQueue; // stores the list of write requests.
+    private volatile Queue<String> finishQueue; // stores list of replicaId whose requests are processed.
 
     private volatile List<String> replicas; // stores only address of replicas.
 
@@ -433,7 +433,7 @@ public class Leader {
                             // TODO write data to buffer.
                             //sc.write(buffer);
                             // TODO clear buffer
-
+                            request.KVPair.commitId++;
                             byte[] sendData = SerializationUtils.serialize(request.KVPair);
                             sc.write(ByteBuffer.wrap(sendData));
                             System.out.println("Sent Commit Request: "+(latestCommitId+1));
@@ -468,7 +468,7 @@ public class Leader {
                         CommitAttachment attachment = (CommitAttachment) key.attachment();
 
                         if (attachment.state == CommitState.COMMIT  // TODO CHECK THE CONDITION
-                             && attachment.commitId == latestCommitId+1 ) {
+                             && attachment.commitId == (latestCommitId+1)) {
                             // TODO change the commit id condition.
                             // read to buffer
                             //ByteBuffer buffer = attachment.buffer;
@@ -521,6 +521,8 @@ public class Leader {
             latestCommitId++;
             System.out.println("Commit "+latestCommitId + " completed.");
             System.out.flush();
+            // write to finished queue?
+            finishQueue.add(request.replicaId);
 
         }
 

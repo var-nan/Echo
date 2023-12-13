@@ -26,8 +26,11 @@ java{
 dependencies {
     implementation 'org.apache.zookeeper:zookeeper:3.8.3'
     implementation group: 'org.apache.commons', name: 'commons-lang3', version: '3.12.0'
+    implementation group: 'org.apache.logging.log4j',name: 'log4j-core',version: '2.21.0'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.21.0'
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
+
 }
 
 test {
