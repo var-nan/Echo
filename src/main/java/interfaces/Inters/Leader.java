@@ -73,6 +73,7 @@ public class Leader {
                 var data = zooKeeper.getData(replicaPath + "/" + child, false, null);
                 replicas.add(new String(data));
             }
+            System.out.println("Current Replicas size: "+children.size());
             connectedReplicas = replicas.size();
             // establish watch again?
             //zooKeeper.exists(replicaPath, re);
@@ -285,7 +286,10 @@ public class Leader {
                     DTO.RequestObject request =  SerializationUtils.deserialize(buffer.array());
                     buffer.clear();
                     attachment.id = request.replicaId;
-                    request.KVPair.commitId = ++latestCommitId;
+                    synchronized (this) {
+                        ++latestCommitId;
+                    }
+                    request.KVPair.commitId = latestCommitId; // incrementing commit id.
                     requestQueue.add(request);
                     key.attach(attachment);
                 }
@@ -406,6 +410,7 @@ public class Leader {
 
            ** DO NOT ACCEPT NEW CONNECTIONS DURING THE PROTOCOL.
              */
+            //request.KVPair.commitId++;
             // TODO check commit Id in the request object, lower commitId causes the replica to ignore the commit. VERIFY ASAP
             commitInProgress = true;
             // PHASE 1: SEND COMMIT MESSAGE TO ALL REPLICAS.
@@ -432,14 +437,13 @@ public class Leader {
                             //ByteBuffer buffer = attachment.buffer;
                             // TODO write data to buffer.
                             //sc.write(buffer);
-                            // TODO clear buffer
-                            request.KVPair.commitId++;
+                            //request.KVPair.commitId++;
                             byte[] sendData = SerializationUtils.serialize(request.KVPair);
                             sc.write(ByteBuffer.wrap(sendData));
-                            System.out.println("Sent Commit Request: "+(latestCommitId+1));
+                            System.out.println("Sent Commit Request: "+(latestCommitId));
                             //attachment.outputStream.writeObject(request.KVPair);
                             //attachment.outputStream.flush();
-                            attachment.commitId = latestCommitId + 1;
+                            attachment.commitId = latestCommitId;
                             attachment.state = CommitState.COMMIT;
                             count++;
                         }
@@ -468,7 +472,7 @@ public class Leader {
                         CommitAttachment attachment = (CommitAttachment) key.attachment();
 
                         if (attachment.state == CommitState.COMMIT  // TODO CHECK THE CONDITION
-                             && attachment.commitId == (latestCommitId+1)) {
+                             && attachment.commitId == (latestCommitId)) {
                             // TODO change the commit id condition.
                             // read to buffer
                             //ByteBuffer buffer = attachment.buffer;
@@ -490,7 +494,7 @@ public class Leader {
                             //var response = (COMMIT_RESPONSE) attachment.inputStream.readObject();
                             if (response == DTO.COMMIT_RESPONSE.ACKNOWLEDGEMENT) {
                             // todo: handle this later.
-                                System.out.println("Received Ack from server. Commit :"+(latestCommitId+1));
+                                System.out.println("Received Ack from server. Commit :"+(latestCommitId));
                             } else {
 
                             }
@@ -518,8 +522,8 @@ public class Leader {
 
             // commit current request to db, and increment commit id.
             dataStore.put(request.KVPair.key, request.KVPair.value);
-            latestCommitId++;
-            System.out.println("Commit "+latestCommitId + " completed.");
+            //latestCommitId++;
+            System.out.println("Commit "+ latestCommitId + " completed.");
             System.out.flush();
             // write to finished queue?
             finishQueue.add(request.replicaId);
