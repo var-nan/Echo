@@ -53,6 +53,16 @@ Download the [Apache ZooKeeper](https://dlcdn.apache.org/zookeeper/zookeeper-3.8
 
 Replicas and clients can be run in a single machine in a standalone environment.
 
+## Note
+
+We kept our API as simple as possible to give the users a standard interface like a regular data store. 
+The decision to make the *write* requests to process only through the leader is intentional to provide Sequential Consistency. 
+Our datastore is sequentially consistent if the network guarantees no partitions and jitters in the network. 
+
+ Most of the design decisions are finalized after considering many alternative design models and implementation difficulties. 
+ We want to build this project with realistic assumptions. In addition, we modified the 1-phase commit protocol to integrate with our architecture. 
+ This decision is to make the I/O channels transfer as little data as possible to commit a transaction.
+
 ## Contribution
 
-We welcome any feedback and suggestions to this project.
+We welcome any feedback and suggestions for this project. Feel free to submit an issue/feedback/suggestions.
